@@ -1450,6 +1450,18 @@ AS_IF([test "x$enable_core_libedit_support" != "xno"],[
       AC_MSG_ERROR([You need to either install libedit-dev (>= 2.11) or configure with --disable-core-libedit-support])
       ])])])
 
+AC_CHECK_LIB([webrtcvad], [WebRtcVad_Create], [],
+[ 
+    echo "webrtc-vad-lib failure." 
+    exit -1
+])
+
+#AC_CHECK_LIB([uuid], [uuid_generate], [],
+#[ 
+#    echo "uuid-dev failure." 
+#    exit -1
+#])
+
 dnl ---------------------------------------------------------------------------
 dnl - OpenLDAP SDK
 dnl ---------------------------------------------------------------------------
