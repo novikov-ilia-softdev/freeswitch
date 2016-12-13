@@ -602,20 +602,22 @@ void write_wav_buffer_to_file( vmd_session_info_t *vmd_info)
 {
 	char file_name[ 80];
 	FILE* file;
-	char buf[ 80];
-	char* tmp_file_name;
 
-	tmpnam( buf);
-	tmp_file_name = &buf[ 5];
+	char unique_filename[] = "XXXXXX";
+	mktemp( unique_filename);
 
-	sprintf( file_name, "/tmp/voice_dialog/userSaid/%s.wav", tmp_file_name);
+	if( !strcmp( unique_filename, "")){
+		printf( "mktemp failed\n");
+		return;
+	}
+
+	sprintf( file_name, "/tmp/voice_dialog/userSaid/%s.wav", unique_filename);
 	file = wav_file_open( file_name);
 
 	if( !file){
 		printf( "no such directory %s\n\n", file_name);
 		return;
 	}
-
 
 	for( int i = 0; i < vmd_info->wav_buffer->size; i++)
 	{
@@ -653,7 +655,7 @@ FILE * wav_file_open( const char *file_name )
 	header.bits_per_sample = bits_per_sample;
 	header.data_length = 0;
 
-	file = fopen(file_name,"wb");
+	file = fopen(file_name,"wbx");
 	if(!file) return 0;
 
 	fwrite(&header,sizeof(header),1,file);
