@@ -1,0 +1,23 @@
+<configuration name="vad.conf" description="vad configuration">
+  <settings>
+    
+    <!-- directory to hold wav files with user speech -->
+    <param name="user_said_directory" value="/tmp/voice_dialog/userSaid"/>
+    
+    <!-- size of buffer in frames (duration - 20 ms) to detect speech [1-10000] -->
+    <param name="ring_buffer_size" value="16"/>
+
+    <!-- if percentage of voice/unvoice frames in ring_buffer > ring_buffer_full_percentage, then ring_buffer triggers [0-100] -->
+    <param name="ring_buffer_full_percentage" value="90"/>
+    
+    <!-- size of buffer in frames (duration - 20 ms) to create wav file [1-10000] -->
+    <param name="wav_buffer_size" value="1000"/>
+
+    <!-- VAD operating mode [0-3] -->
+    <param name="aggressive_mode" value="0"/>
+
+    <!-- after stop speech timeout in ms -->
+    <param name="after_stop_speech_timeout_ms" value="2000"/>
+
+  </settings>
+</configuration>

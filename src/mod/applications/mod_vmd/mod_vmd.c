@@ -43,15 +43,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "webrtc/common_audio/vad/include/webrtc_vad.h"
-#include <sys/time.h>
 #ifdef WIN32
 #include <float.h>
 #define ISNAN(x) (!!(_isnan(x)))
 #else
 #define ISNAN(x) (isnan(x))
 #endif
-
 
 /*! Number of points for beep detection. */
 #define POINTS 32
@@ -120,7 +117,6 @@
 
 /*! FreeSWITCH CUSTOM event type. */
 #define VMD_EVENT_BEEP "vmd::beep"
-#define USER_SAID "user_said"
 
 /* Prototypes */
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_vmd_shutdown);
@@ -149,20 +145,6 @@ typedef struct vmd_codec_info {
 	int channels;
 } vmd_codec_info_t;
 
-typedef struct{
-	void* data;
-	uint32_t datalen;
-	uint32_t rate;
-	uint32_t samples;
-	int is_voiced;
-} audio_frame_t;
-
-typedef struct{
-	 audio_frame_t ** buffer;
-     int size;
-     int capacity;
-} ring_buffer_t;
-
 /*! Type that holds session information pertinent to the vmd module. */
 typedef struct vmd_session_info {
 	/*! State of the session. */
@@ -182,13 +164,6 @@ typedef struct vmd_session_info {
 	switch_size_t timestamp;
 	/*! The MIN_TIME to use for this call */
 	int minTime;
-
-	int inited;
-	ring_buffer_t* ring_buffer;
-	ring_buffer_t* wav_buffer;
-	int triggered;
-	VadInst* vad;
-
 } vmd_session_info_t;
 
 static switch_bool_t process_data(vmd_session_info_t *vmd_info, switch_frame_t *frame);
@@ -198,40 +173,6 @@ static double ampl_estimator(double *x);
 static void convert_pts(int16_t *i_pts, double *d_pts, int16_t max);
 static void find_beep(vmd_session_info_t *vmd_info, switch_frame_t *frame);
 static double median(double *m, int n);
-
-struct wavfile_header {
-	char	riff_tag[4];
-	int		riff_length;
-	char	wave_tag[4];
-	char	fmt_tag[4];
-	int		fmt_length;
-	short	audio_format;
-	short	num_channels;
-	int		sample_rate;
-	int		byte_rate;
-	short	block_align;
-	short	bits_per_sample;
-	char	data_tag[4];
-	int		data_length;
-};
-
-void vad_collector( vmd_session_info_t *vmd_info, switch_frame_t *frame);
-void fire_user_said_event( vmd_session_info_t *vmd_info, const char* file_name);
-void init_ring_buffer(ring_buffer_t* rb, int capacity);
-void push_to_ring_buffer(ring_buffer_t* rb, audio_frame_t * data);
-void clear_ring_buffer(ring_buffer_t* rb);
-void handle_non_triggered( vmd_session_info_t *vmd_info);
-void handle_triggered( vmd_session_info_t *vmd_info);
-int count_frames_in_ring_buffer( ring_buffer_t* rb, int is_voice);
-int is_enough_frames_in_ring_buffer( ring_buffer_t* rb, int frames_count);
-void copy_ring_buffer_to_wav_buffer( vmd_session_info_t *vmd_info);
-void copy_frame_to_buffer( vmd_session_info_t *vmd_info, switch_frame_t *frame, ring_buffer_t* rb);
-void write_wav_buffer_to_file( vmd_session_info_t *vmd_info);
-FILE * wav_file_open( const char *file_name );
-void wav_file_close( FILE *file );
-
-void RB_print( ring_buffer_t* rb);
-
 
 /*
 #define PRINT(a) do{ switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, a); }while(0)
@@ -290,7 +231,7 @@ static switch_bool_t process_data(vmd_session_info_t *vmd_info, switch_frame_t *
 	double pts[P];
 	int16_t *data;
 	int16_t max;
-        
+
 	//len = frame->samples * sizeof(int16_t);
 	data = (int16_t *) frame->data;
 
@@ -329,8 +270,6 @@ static switch_bool_t process_data(vmd_session_info_t *vmd_info, switch_frame_t *
 		vmd_info->pos = j % POINTS;
 		find_beep(vmd_info, frame);
 	}
-
-	vad_collector( vmd_info, frame);
 
 	return SWITCH_TRUE;
 }
@@ -432,253 +371,6 @@ static void find_beep(vmd_session_info_t *vmd_info, switch_frame_t *frame)
 
 		break;
 	}
-}
-
-void vad_collector( vmd_session_info_t *vmd_info, switch_frame_t *frame)
-{
-	if( !vmd_info->inited)
-	{
-		vmd_info->vad = WebRtcVad_Create();
-		WebRtcVad_Init( vmd_info->vad);
-
-		vmd_info->ring_buffer = (ring_buffer_t*)(malloc(sizeof(ring_buffer_t)));
-		init_ring_buffer( vmd_info->ring_buffer, 16);
-
-		vmd_info->wav_buffer = (ring_buffer_t*)(malloc(sizeof(ring_buffer_t)));
-		init_ring_buffer( vmd_info->wav_buffer, 1000);
-
-		vmd_info->inited++;
-	}
-
-	if( vmd_info->triggered)
-		copy_frame_to_buffer( vmd_info, frame, vmd_info->wav_buffer);
-
-	copy_frame_to_buffer( vmd_info, frame, vmd_info->ring_buffer);
-	//RB_print( vmd_info->ring_buffer);
-	vmd_info->triggered ? handle_triggered( vmd_info) : handle_non_triggered( vmd_info);
-}
-
-void RB_print( ring_buffer_t * rb)
-{
-	printf( "RB %p: \n", (void*) rb);
-	for( int i = 0; i < rb->size; i++)
-	{
-		audio_frame_t* frame = rb->buffer[ i];
-		printf( "%p ", (void*)frame);
-		printf( "%d ", frame->is_voiced);
-	}
-	printf( "\n\n");
-}
-
-void copy_frame_to_buffer( vmd_session_info_t *vmd_info, switch_frame_t *frame, ring_buffer_t* rb)
-{
-	audio_frame_t* audio_frame = (audio_frame_t*)(malloc(sizeof(audio_frame_t)));
-	audio_frame->datalen = frame->datalen;
-	audio_frame->rate = frame->rate;
-	audio_frame->samples = frame->samples;
-	audio_frame->data = (void*)(malloc(sizeof(char) * frame->datalen));
-	memcpy( audio_frame->data, frame->data, frame->datalen);
-	audio_frame->is_voiced = WebRtcVad_Process(vmd_info->vad, audio_frame->rate, audio_frame->data, audio_frame->samples);
-	//printf( "new! %p: %d\n", (void*)frame, audio_frame->is_voiced);
-	push_to_ring_buffer( rb, audio_frame);
-}
-
-void handle_non_triggered( vmd_session_info_t *vmd_info)
-{
-	int num_voiced;
-	num_voiced = count_frames_in_ring_buffer( vmd_info->ring_buffer, 1);
-	//printf( "vmd_info->ring_buffer:%p, num_voiced:%d\n", (void*)vmd_info->ring_buffer, num_voiced);
-	if( is_enough_frames_in_ring_buffer( vmd_info->ring_buffer, num_voiced))
-	{
-		vmd_info->triggered = 1;
-		printf( "start speech\n");
-		copy_ring_buffer_to_wav_buffer( vmd_info);
-		clear_ring_buffer( vmd_info->ring_buffer);
-	}
-}
-
-void handle_triggered( vmd_session_info_t *vmd_info)
-{
-	int num_unvoiced;
-	num_unvoiced = count_frames_in_ring_buffer( vmd_info->ring_buffer, 0);
-	if( is_enough_frames_in_ring_buffer( vmd_info->ring_buffer, num_unvoiced))
-	{
-		vmd_info->triggered = 0;
-		printf( "stop speech\n");
-		write_wav_buffer_to_file( vmd_info);
-		clear_ring_buffer( vmd_info->wav_buffer);
-		clear_ring_buffer( vmd_info->ring_buffer);
-	}
-}
-
-void fire_user_said_event( vmd_session_info_t *vmd_info, const char* file_name)
-{
-	switch_event_t *event;
-
-	switch_event_create_subclass( &event, SWITCH_EVENT_CUSTOM, USER_SAID);
-	switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "file_path", file_name);
-	switch_core_session_queue_event( vmd_info->session, &event);
-}
-
-int count_frames_in_ring_buffer( ring_buffer_t* rb, int is_voice)
-{
-	int count;
-	count = 0;
-	for( int i = 0; i < rb->size; i++)
-	{
-		audio_frame_t* frame = rb->buffer[ i];
-		if( is_voice == frame->is_voiced)
-			count++;
-	}
-
-	return count;
-}
-
-int is_enough_frames_in_ring_buffer( ring_buffer_t* rb, int frames_count)
-{
-	return ( frames_count > 0.9 * rb->capacity);
-}
-
-void init_ring_buffer(ring_buffer_t* rb, int capacity)
-{
-	rb->buffer = (audio_frame_t**)(malloc(sizeof(audio_frame_t) * capacity));
-	rb->size = 0;
-	rb->capacity = capacity;
-}
-
-void push_to_ring_buffer(ring_buffer_t* rb, audio_frame_t * data)
-{
-	if( rb->size < rb->capacity){
-		rb->buffer[ rb->size++] = data;
-		return;
-	}
-
-	if( rb->size == rb->capacity)
-	{
-		audio_frame_t * frame;
-		frame = rb->buffer[ 0];
-		free( frame->data);
-		free( frame);
-
-		for( int i = 0; i < rb->size - 1; i++)
-		{
-			rb->buffer[ i] = rb->buffer[ i + 1];
-		}
-
-		rb->buffer[ rb->size - 1] = data;
-	}
-}
-
-void clear_ring_buffer(ring_buffer_t* rb)
-{
-	for( int i = 0; i < rb->size; i++)
-	{
-		audio_frame_t * frame = rb->buffer[ i];
-		free( frame->data);
-		free( frame);
-	}
-	free(rb->buffer);
-	rb->buffer = (audio_frame_t **)(malloc(sizeof(audio_frame_t *) * rb->capacity));
-	rb->size = 0;
-}
-
-void copy_ring_buffer_to_wav_buffer( vmd_session_info_t *vmd_info)
-{
-	for( int i = 0; i < vmd_info->ring_buffer->size; i++)
-	{
-		audio_frame_t* frame = vmd_info->ring_buffer->buffer[ i];
-		audio_frame_t* audio_frame = (audio_frame_t*)(malloc(sizeof(audio_frame_t)));
-		audio_frame->datalen = frame->datalen;
-		audio_frame->rate = frame->rate;
-		audio_frame->samples = frame->samples;
-		audio_frame->data = (void*)(malloc(sizeof(char) * frame->datalen));
-		memcpy( audio_frame->data, frame->data, frame->datalen);
-		audio_frame->is_voiced = frame->is_voiced;
-		push_to_ring_buffer( vmd_info->wav_buffer, audio_frame);
-	}
-}
-
-void write_wav_buffer_to_file( vmd_session_info_t *vmd_info)
-{
-	char file_name[ 80];
-	FILE* file;
-
-	char unique_filename[] = "XXXXXX";
-	mktemp( unique_filename);
-
-	if( !strcmp( unique_filename, "")){
-		printf( "mktemp failed\n");
-		return;
-	}
-
-	sprintf( file_name, "/tmp/voice_dialog/userSaid/%s.wav", unique_filename);
-	file = wav_file_open( file_name);
-
-	if( !file){
-		printf( "no such directory %s\n\n", file_name);
-		return;
-	}
-
-	for( int i = 0; i < vmd_info->wav_buffer->size; i++)
-	{
-		audio_frame_t* frame = vmd_info->wav_buffer->buffer[ i];
-		fwrite( frame->data, sizeof( char), frame->datalen, file);
-	}
-
-	wav_file_close( file);
-
-	printf( "write %d frames to wav file\n\n", vmd_info->wav_buffer->size);
-
-	fire_user_said_event( vmd_info, file_name);
-}
-
-FILE * wav_file_open( const char *file_name )
-{
-	struct wavfile_header header;
-	FILE * file;
-
-	int samples_per_second = 8000;
-	int bits_per_sample = 16;
-
-	strncpy(header.riff_tag,"RIFF",4);
-	strncpy(header.wave_tag,"WAVE",4);
-	strncpy(header.fmt_tag,"fmt ",4);
-	strncpy(header.data_tag,"data",4);
-
-	header.riff_length = 0;
-	header.fmt_length = 16;
-	header.audio_format = 1;
-	header.num_channels = 1;
-	header.sample_rate = samples_per_second;
-	header.byte_rate = samples_per_second*(bits_per_sample/8);
-	header.block_align = bits_per_sample/8;
-	header.bits_per_sample = bits_per_sample;
-	header.data_length = 0;
-
-	file = fopen(file_name,"wbx");
-	if(!file) return 0;
-
-	fwrite(&header,sizeof(header),1,file);
-
-	fflush(file);
-
-	return file;
-}
-
-void wav_file_close( FILE *file )
-{
-	int riff_length;
-	int file_length = ftell(file);
-
-	int data_length = file_length - sizeof(struct wavfile_header);
-	fseek(file,sizeof(struct wavfile_header) - sizeof(int),SEEK_SET);
-	fwrite(&data_length,sizeof(data_length),1,file);
-
-	riff_length = file_length - 8;
-	fseek(file,4,SEEK_SET);
-	fwrite(&riff_length,sizeof(riff_length),1,file);
-
-	fclose(file);
 }
 
 /*! \brief Find the median of an array of doubles 
@@ -879,7 +571,6 @@ SWITCH_STANDARD_APP(vmd_start_function)
 	vmd_info->state = BEEP_NOT_DETECTED;
 	vmd_info->session = session;
 	vmd_info->pos = 0;
-
 	/*
 	   vmd_info->data = NULL;
 	   vmd_info->data_len = 0;
@@ -914,6 +605,7 @@ SWITCH_STANDARD_APP(vmd_start_function)
  */
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_vmd_shutdown)
 {
+
 	switch_event_free_subclass(VMD_EVENT_BEEP);
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Voicemail detection disabled\n");
 
@@ -1008,7 +700,6 @@ SWITCH_STANDARD_API(vmd_api_main)
 	vmd_info->state = BEEP_NOT_DETECTED;
 	vmd_info->session = vmd_session;
 	vmd_info->pos = 0;
-
 /*
     vmd_info->data = NULL;
     vmd_info->data_len = 0;

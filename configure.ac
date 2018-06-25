@@ -1456,12 +1456,6 @@ AC_CHECK_LIB([webrtcvad], [WebRtcVad_Create], [],
     exit -1
 ])
 
-#AC_CHECK_LIB([uuid], [uuid_generate], [],
-#[ 
-#    echo "uuid-dev failure." 
-#    exit -1
-#])
-
 dnl ---------------------------------------------------------------------------
 dnl - OpenLDAP SDK
 dnl ---------------------------------------------------------------------------
@@ -1796,6 +1790,8 @@ AC_CONFIG_FILES([Makefile
 		src/mod/applications/mod_stress/Makefile
 		src/mod/applications/mod_translate/Makefile
 		src/mod/applications/mod_valet_parking/Makefile
+		src/mod/applications/mod_vad/Makefile
+		src/mod/applications/mod_pipe/Makefile
 		src/mod/applications/mod_vmd/Makefile
 		src/mod/applications/mod_voicemail/Makefile
 		src/mod/applications/mod_voicemail_ivr/Makefile

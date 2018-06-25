@@ -1,0 +1,8 @@
+<configuration name="pipe.conf" description="pipe configuration">
+  <settings>
+    
+    <!-- use pipe path (generate pipe if empty) -->
+    <param name="use_pipe_path" value=""/>
+    
+  </settings>
+</configuration>
