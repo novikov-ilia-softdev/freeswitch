@@ -32,11 +32,13 @@ void fire_start_write_to_pipe_event( pipe_session_info_t *pipe_session);
 
 static struct {
 	char *use_pipe_path;
+	char *pipe_dir;
 
 } globals;
 
 static switch_xml_config_item_t instructions[] = {
 	SWITCH_CONFIG_ITEM( "use_pipe_path", SWITCH_CONFIG_STRING, CONFIG_RELOADABLE, &globals.use_pipe_path, "", NULL, NULL, NULL),
+	SWITCH_CONFIG_ITEM( "pipe_dir", SWITCH_CONFIG_STRING, CONFIG_RELOADABLE, &globals.pipe_dir, "", NULL, NULL, NULL),
 	SWITCH_CONFIG_ITEM_END()
 };
 
@@ -68,6 +70,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_pipe_load)
 
 	do_config( SWITCH_FALSE);
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "use_pipe_path: %s\n", globals.use_pipe_path);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "pipe_dir: %s\n", globals.pipe_dir);
 
 	SWITCH_ADD_APP(app_interface, "pipe", "pipe", "send audio frame to pipe", mod_pipe_start_function, "[start] [stop]", SAF_NONE);
 
@@ -163,8 +166,9 @@ void handle_session_init( pipe_session_info_t *session)
 
 	if( !strcmp( globals.use_pipe_path, ""))
 	{
-		file_path_template = "/tmp/XXXXXX";
-		strcpy( session->pipe_path, file_path_template);
+		file_path_template = "XXXXXX";
+		strcpy( session->pipe_path, globals.pipe_dir);
+		strcat( session->pipe_path, file_path_template);
 		mktemp( session->pipe_path);
 	}
 	else
